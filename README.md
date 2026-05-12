@@ -240,4 +240,4 @@ jupyter lab notebooks/
 
 ## Contact
 
-**Amrendra Vimal** — [amrendra.vimal@albertsons.com](mailto:amrendra.vimal@albertsons.com)
+**Amrendra Vimal**
