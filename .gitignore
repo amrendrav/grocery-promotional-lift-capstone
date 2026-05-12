@@ -1,0 +1,40 @@
+# Data — never commit raw datasets
+data/raw/*
+data/interim/*
+data/processed/*
+!data/raw/.gitkeep
+!data/interim/.gitkeep
+!data/processed/.gitkeep
+!data/raw/README.md
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+
+# Jupyter
+.ipynb_checkpoints/
+*/.ipynb_checkpoints/*
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
+
+# Secrets
+.env
+*.local
+
+# Local editor/agent config
+.claude/
+
+# Build artifacts
+build/
+dist/
+
+# Keep the saved EDA/model plots — they're referenced from the README and total < 1 MB.
+# Add specific exclusions here if individual files become too large.
