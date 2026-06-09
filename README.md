@@ -2,203 +2,249 @@
 
 **Author:** Amrendra Vimal
 **Program:** UC Berkeley Professional Certificate in Machine Learning & Artificial Intelligence
-**Module:** 20.1 — Initial Report and Exploratory Data Analysis
+**Module:** 24.1 — Final Capstone Submission
 
 ---
 
-## Executive Summary
+## What this project does, in plain English
 
-Grocery retailers run thousands of promotions every quarter — price discounts, weekly flyer features, end-cap displays — but rarely know *how much* of the resulting sales spike was actually caused by the promotion versus what would have sold anyway. This project quantifies that **promotional lift** using five years of daily store-level sales and weekly price data from Walmart, and builds a baseline forecasting model that lets a planner predict sales under different discount scenarios. The downstream value is sharper inventory planning: fewer empty shelves on under-forecasted promotions, and less perishable waste from over-forecasted ones.
+Grocery stores run thousands of promotions every quarter — temporary price cuts, weekly-flyer features, end-cap displays. But when sales spike during a promotion, it's hard to tell **how much** of that spike was actually caused by the promotion versus what would have sold anyway.
 
-## Rationale (Why does this question matter?)
+This project answers two questions:
 
-Grocery margins are thin (1–3% net) and a large share of inventory is perishable. Two costly failure modes dominate planning:
+1. **For past promotions:** how much extra sales did each one actually generate, after accounting for seasonality and other normal demand patterns?
+2. **For future promotions:** if a planner is considering a 15% discount next week on a specific product category, what unit sales should they expect — and how confident can we be in that number?
 
-- **Under-forecasting a promotion** → stockouts, lost sales, frustrated customers, lost loyalty.
-- **Over-forecasting a promotion** → excess perishable stock → markdowns → food waste → financial loss.
+The downstream value is **better inventory planning**:
 
-A model that decomposes observed sales into "what we'd sell anyway" + "promotional lift at this discount depth" lets category managers spend their promotional budget on lifts that actually drive profit, and lets supply chain teams place orders that match the expected demand curve.
+- Fewer empty shelves (stockouts) on under-forecasted promotions.
+- Less perishable waste from over-forecasted promotions.
 
-## Research Question
+Grocery margins are thin (1–3% net), so even modest improvements in forecast accuracy translate to meaningful P&L impact.
+
+---
+
+## Headline results
+
+- Compared **six different models** on a uniform 12-week temporal holdout.
+- The best models reduce forecasting error by **~41% vs the "last week's sales" benchmark** and **~17% vs a standard Linear Regression baseline**.
+- A working **scenario forecasting tool** ([`notebooks/07_scenario_tool.ipynb`](notebooks/07_scenario_tool.ipynb)) takes a 4-week discount schedule and outputs a sales forecast with an 80% prediction interval — the kind of artifact a category manager could use day-to-day.
+- A **key methodological finding**: simple "promo vs no-promo" lift comparisons (the kind reported in industry dashboards) overstate the real impact of promotions by 10–20 percentage points. Most of the apparent lift is **seasonality and selection bias** — the items and weeks that get promoted are the same ones that already sell more. Only after a model controls for those confounders does the true promo signal emerge.
+
+---
+
+## Important findings (nontechnical)
+
+### 1. Naive lift estimates overstate promotion impact
+
+If you compare average sales on promotion weeks vs non-promotion weeks (without any other controls), you'd report that the **Foods 2** category gets **+20.5% lift** from a promotion, **Household 1** gets **+17.9%**, and so on. But these numbers are mostly **wrong** — they include the effect of Q4 holiday seasons, year-over-year growth, and the fact that the categories that get promoted heaviest are also the ones with the highest baseline sales anyway.
+
+Once we let a regression model control for last-week's sales, seasonality, calendar events, and SNAP food-assistance days, the naive lift numbers collapse. The takeaway for the business: **headline promotional lift reports are likely overstating the true incremental sales by a large margin**. A planner who places inventory based on those numbers will over-order.
+
+### 2. Non-linear effects matter — but not by as much as one might expect
+
+The biggest jump in accuracy comes from going from "last week's sales" (naive baseline) to a **multiple linear regression** with lag features and seasonality controls (~27% RMSE reduction). The further jump from linear regression to non-linear models (Polynomial Features, SVR) gives another ~17% reduction, but the bulk of the predictive signal is already captured by the right linear features. **Spending engineering effort on richer features tends to pay off more than spending it on fancier model algorithms.**
+
+### 3. Walmart's everyday-low-price strategy is real
+
+Only **1.67%** of (item × store × week) combinations show any price drop from the rolling regular price. When discounts do happen, they're meaningful (median 8% off, 95th percentile 50% off), but the dataset's overall promo intensity is much lower than at a typical "high-low" pricing retailer like Albertsons or Kroger. At the **(department × store × week)** grain we used for modeling, 57% of weeks have at least one item on promo — sufficient signal for the model.
+
+### 4. The model knows when to trust itself less
+
+When the scenario tool is asked to forecast a department-store with sparse historical promo activity (e.g., HOBBIES_2), the prediction interval widens automatically — driven by the model's larger residual variance in that segment. This is exactly the behavior we want from a planning tool.
+
+---
+
+## Recommendations for a category manager (non-technical reader)
+
+1. **Stop using raw "average sales on promo weeks" as a lift estimate.** They're inflated by seasonality and the fact that high-volume products get promoted more often. Use a model-based estimate that controls for these confounders.
+2. **Build promotional plans around the scenario tool's prediction interval, not just the point forecast.** If the 80% interval is wide, you have meaningful uncertainty — order conservatively. If the interval is tight, you can lean into the point forecast.
+3. **Re-train the model on your own retailer's data before deploying.** The Walmart M5 data this project uses has different promotional behavior than Albertsons (EDLP vs hi-lo); the methodology transfers but the coefficients won't.
+4. **Treat the operational definition of "promotion" as a business choice.** This project uses "price ≥ 5% below the rolling 4-week median" as the operational definition. A different threshold would give different lift estimates. Pick the threshold that matches how your business uses the word "promotion."
+
+---
+
+## Research question
 
 **How can historical sales and pricing data be used to quantify promotional lift and predict future sales volume under varying discount scenarios?**
 
 Specifically: given a product department, a store, a calendar week, and a planned discount depth, what unit-sales volume should the retailer expect — and how confident can we be in that prediction?
 
-## Data Sources
+---
 
-**Primary:** [M5 Forecasting - Accuracy (Walmart)](https://www.kaggle.com/competitions/m5-forecasting-accuracy) (Kaggle).
+## Data
 
-| Table                          | Rows                     | Key columns                                                                       |
-| ------------------------------ | ------------------------ | --------------------------------------------------------------------------------- |
-| `sales_train_evaluation.csv`   | 30,490 × ~1,947 (wide)   | `id, item_id, dept_id, cat_id, store_id, state_id, d_1...d_1941`                  |
-| `sell_prices.csv`              | ~6.8M                    | `store_id, item_id, wm_yr_wk, sell_price` (weekly avg)                            |
-| `calendar.csv`                 | ~1,969                   | `date, d, wm_yr_wk, event_name_1/2, event_type_1/2, snap_CA/TX/WI`                |
+**Primary dataset:** [M5 Forecasting - Accuracy (Walmart)](https://www.kaggle.com/competitions/m5-forecasting-accuracy) from Kaggle.
 
-**Coverage:** 3,049 unique products × 10 Walmart stores in 3 US states (CA, TX, WI), Jan 2011 → May 2016. Categories: FOODS, HOBBIES, HOUSEHOLD; departments: FOODS_1/2/3, HOBBIES_1/2, HOUSEHOLD_1/2.
+- 3,049 unique products × 10 Walmart stores in 3 US states (CA, TX, WI), Jan 2011 → May 2016
+- 3 categories (FOODS, HOBBIES, HOUSEHOLD), 7 departments
+- Daily unit sales (wide-format)
+- Weekly sell prices
+- US calendar with annotated events (Christmas, SuperBowl, Easter, etc.)
+- State-level SNAP food-assistance flags
 
 **Why this dataset:**
 
-- **Has weekly prices** — enables the "varying discount scenarios" part of the research question (the original Favorita dataset only had a boolean promo flag, no price).
-- **US retailer** — directly transferable to a US grocery context (the author works at Albertsons). Includes SNAP food-assistance flags, which are a real US demand signal.
-- **5 years of daily data** — supports robust seasonality decomposition and year-over-year comparisons.
-- **Bundled US calendar** — `calendar.csv` has annotated events (Christmas, SuperBowl, Easter, etc.) and three state-level SNAP flags.
+- **Has weekly prices** — enables computing a discount-depth feature (an earlier candidate, Favorita, only had a boolean promo flag).
+- **US retailer** — directly relevant to the author's industry context (Albertsons).
+- **5+ years of daily data** — supports seasonality decomposition and year-over-year comparisons.
 
-**Supplemental:** [Dunnhumby Complete Journey](https://www.kaggle.com/datasets/frtgnn/dunnhumby-the-complete-journey) and [Favorita](https://www.kaggle.com/competitions/favorita-grocery-sales-forecasting) — kept on disk for a possible M24 cross-dataset validation (apply the same methodology to a second retailer to demonstrate the approach generalizes).
+Download instructions live in [data/raw/README.md](data/raw/README.md). The raw files are gitignored.
+
+---
 
 ## Methodology
 
-### Phase 1 — Data preparation (Notebook 01)
+The work splits cleanly into seven notebooks, executed in order.
 
-- Load `calendar.csv`, melt wide-format sales into long, join to dates.
-- Filter to items with first non-zero sale before 2013-01-01 — keeps only items with full study-period history. Avoids contamination from launch curves.
-- Compute per-(item, store, week) **discount depth** as `(regular_price - sell_price) / regular_price`, where `regular_price` is the trailing 4-week median of `sell_price`. This is an operational definition of "promotion" since M5 has no explicit flag.
-- Aggregate to **(dept_id, store_id, week_start)** grain — 7 depts × 10 stores × ~280 weeks ≈ 20K rows. Plenty for regression, tractable in memory.
-- Cache as parquet in `data/interim/m5_weekly_panel.parquet` for fast reload.
+### Phase 1 — Data preparation ([notebooks/01_data_loading.ipynb](notebooks/01_data_loading.ipynb))
 
-### Phase 2 — Exploratory Data Analysis (Notebook 02)
+- Loads `calendar.csv`, melts wide-format sales into long, and joins to dates.
+- Filters to items with first non-zero sale before 2013-01-01 (full study-period history; avoids contamination from item launches).
+- Computes per-(item, store, week) **discount depth** as `(regular_price - sell_price) / regular_price`, where `regular_price` is the **trailing 4-week median** of `sell_price`. This is the operational definition of "promotion" since M5 has no explicit flag.
+- Aggregates to **(dept_id, store_id, week_start)** grain — 7 departments × 10 stores × ~278 weeks ≈ 19,460 rows.
+- Caches the result as parquet in `data/interim/m5_weekly_panel.parquet`.
 
-- Target distribution: weekly unit-sales skew, log-transform decision.
-- Discount distribution: histogram of `sales_weighted_discount_depth`. How often do real promotions happen? At what depth?
-- **Naive lift visualization**: mean weekly sales bucketed by discount depth (0%, 1-10%, 10-20%, 20%+) per department.
-- Seasonality: weekly sales by month and week-of-year, with year-over-year overlay.
-- Event-week effect: lift around SuperBowl, Thanksgiving, Christmas, Easter (from `calendar.csv` events).
-- SNAP effect: weekly sales as a function of how many SNAP-eligible days fell in the week.
-- Missing/zero handling: zero-sale weeks, sparse store-dept pairs, items without prices (not in assortment that week).
+### Phase 2 — Exploratory analysis ([notebooks/02_eda.ipynb](notebooks/02_eda.ipynb))
 
-### Phase 3 — Feature engineering (Notebook 03)
+- Target distribution and log-transform decision.
+- Discount distribution and naive lift bucketing.
+- Seasonality (monthly, year-over-year week-of-year overlay).
+- Event-week effect (SuperBowl, Thanksgiving, Christmas, Easter).
+- SNAP day effect.
 
-- **Calendar**: year, month, week-of-year, quarter, Q4 holiday window flag.
-- **Sales lags**: 1, 2, 4-week lags + 4-week and 12-week trailing means per (store, dept). All shifted by 1 to avoid target leakage.
-- **Promo lags**: 1-week lag of `promo_share` and `sales_weighted_discount_depth` — captures pull-forward / pantry-loading effects.
-- **Event flag**: `has_event_days` (count of event-flagged days in the week).
-- **SNAP intensity**: `snap_days_in_week` keyed to each store's state.
+Nine annotated figures saved to `reports/figures/01_*` through `09_*`.
 
-### Phase 4 — Baseline model (Notebook 03)
+### Phase 3 — Baseline model ([notebooks/03_baseline_model.ipynb](notebooks/03_baseline_model.ipynb))
 
+- Feature engineering: calendar features, sales lags (1, 2, 4 weeks + 4 and 12-week rolling means), promo lags, event flags, SNAP intensity.
 - **Multiple Linear Regression** on the engineered feature matrix.
-- Temporal train/test split: last 12 weeks held out (validity of any time-series split).
-- Metrics: RMSE, MAE, R² on the holdout. Compared against a naive "last-week's-sales" benchmark.
-- This baseline is the comparison anchor for M24, where Polynomial Features (for non-linear discount-response), Ridge/Lasso (for correlated lag features), and SVR (RBF/Polynomial kernels) will be evaluated.
+- Temporal train/test split: last 12 weeks held out.
+- Beats naive last-week-sales benchmark by **27.4% RMSE** in raw units.
 
-## Caveats and Mitigation Plan
+### Phase 4 — Regularized and polynomial models ([notebooks/04_advanced_models.ipynb](notebooks/04_advanced_models.ipynb))
 
-Six known limitations of the chosen dataset/approach, with concrete mitigations baked into the pipeline:
+- **Ridge** (L2) — handles multicollinearity among lagged features.
+- **Lasso** (L1) — sparse, interpretable model.
+- **Polynomial Features (degree 2) + Ridge** — captures non-linear price-discount response and feature interactions.
+- Hyperparameters tuned via `GridSearchCV` over `TimeSeriesSplit(5)`.
 
-### Caveat 1 — Sparsity / intermittency at item-store-day grain
+### Phase 5 — Support Vector Regression ([notebooks/05_svr.ipynb](notebooks/05_svr.ipynb))
 
-Most M5 series at the finest grain have long runs of zero-sale days, well-documented in the M5 literature.
+- **SVR (RBF kernel)** — non-linear surface fitting via radial basis functions.
+- **SVR (Polynomial kernel)** — implicit polynomial expansion of any degree.
+- Hyperparameters tuned via `GridSearchCV` on a recent-80-weeks subsample for tractability, then refit on the full training set.
 
-**Mitigation:** Aggregate to **(dept_id, store_id, week)** grain. Smooths most of the zeros and gives ~20K usable training rows.
+### Phase 6 — Final model comparison ([notebooks/06_model_comparison.ipynb](notebooks/06_model_comparison.ipynb))
 
-### Caveat 2 — Stockouts are not labeled
+- Unified comparison table across all six models on the same 12-week holdout.
+- Per-department breakdown.
+- Residual diagnostics for the top three models.
+- Per-week error decomposition.
+- **Final model selection** based on the combination of accuracy, interpretability, and inference speed.
 
-Zero sales could mean "no demand" OR "out of stock." M5 doesn't distinguish, which biases lift estimates downward when a promo causes a stockout.
+### Phase 7 — Scenario forecasting tool ([notebooks/07_scenario_tool.ipynb](notebooks/07_scenario_tool.ipynb))
 
-**Mitigation:** Documented as a known limitation in the final report. Optionally exclude weeks with zero sales *and* a price drop as suspect (a promo with zero sales is almost certainly a stockout, not a failed promo).
+- Refits the chosen final model (**PolyRidge**) on all available data.
+- Derives 80% prediction intervals from empirical holdout residuals.
+- Implements `forecast(dept_id, store_id, discount_schedule)` returning a 4-week forecast with intervals.
+- Demonstrates three example scenarios (no-promo, light-promo, sustained deep-promo) and a cross-department comparison.
 
-### Caveat 3 — No explicit promotion flag
+---
 
-M5 doesn't tell us when an item was on a promo — we have to infer from prices.
+## Evaluation metric
 
-**Mitigation:** Operational definition baked into the pipeline:
+**Primary metric: RMSE (Root Mean Squared Error) on raw unit sales**, reported on the 12-week holdout.
 
-- `regular_price` = trailing 4-week MEDIAN of `sell_price` per (item, store).
-- `discount_depth = max(0, (regular_price - sell_price) / regular_price)`.
-- `is_promotion = (discount_depth > 0.05)` — anything more than 5% below the rolling regular price.
+**Why RMSE?** In an inventory-planning context, **large errors are disproportionately costly** — a single bad forecast can cause a stockout (lost sale + lost loyalty) or a markdown cascade (perishable waste). RMSE penalizes large errors more than MAE (which weights all errors linearly), directly matching the business cost we care about. We also report **MAE** (median forecast error in units) and **R²** (variance explained) as secondary metrics for completeness.
 
-Median (vs mean) is robust to single-week price drops that would otherwise bias the regular-price baseline downward.
-
-### Caveat 4 — Variable item launch dates
-
-Some items have zero sales early because they hadn't launched yet, not because of low demand.
-
-**Mitigation:** Filter to items with first non-zero sale before **2013-01-01**. Guarantees ≥3 years of full history per item.
-
-### Caveat 5 — Weekly prices, not daily
-
-`sell_prices.csv` averages prices over the week. Intra-week price moves are invisible.
-
-**Mitigation:** Non-issue at our weekly grain — the price granularity matches the modeling granularity.
-
-### Caveat 6 — Only 3 categories (Foods, Hobbies, Household)
-
-Less product variety than a full retail dataset.
-
-**Mitigation:** FOODS has 3 sub-departments (FOODS_1/2/3) where most grocery-promo behavior lives. Frame the analysis as "demonstrate methodology on Foods primarily, with Hobbies + Household as cross-category robustness check." This is sufficient for a capstone.
+---
 
 ## Results
 
-### Data and EDA findings (Notebooks 01 & 02)
+### Final model comparison (12-week holdout, March 1 – May 17, 2016)
 
-- **Final panel**: 19,460 rows at `(dept_id × store_id × week_start)` grain, spanning **2011-01-25 → 2016-05-17** (~5.3 years × 7 departments × 10 stores). Pristine — zero nulls, full 278-week coverage on every (dept, store) pair, no zero-sale weeks.
-- **Target is heavily right-skewed** (skew 2.31 raw → -0.60 after log1p). The baseline model uses `log1p(unit_sales)` as the target.
-- **Walmart's EDLP pricing is real**: only 1.67% of (item, store, week) rows show *any* price drop from the trailing 4-week median, but when discounts do happen they're meaningful (median 8%, 95th percentile 50%).
-- **At the modeling grain (dept-store-week), promo coverage is reasonable**: 57.3% of cells have at least one promoted item; 13.7% have promo_share ≥ 1%.
-- **Promo prevalence varies sharply by department**: FOODS_3 has promo activity in 86% of weeks; HOBBIES_2 only in 20%.
-- **Naive lift (any-promo vs no-promo, no controls)** by department: FOODS_2 +20.5%, HOUSEHOLD_1 +17.9%, FOODS_3 +14.2%, HOBBIES_2 +3.7%, FOODS_1 +2.4%, **HOBBIES_1 −4.0%** (the negative sign is exactly the kind of confounded signal a regression model needs to untangle).
-- **Clear annual seasonality** with Q4 holiday peaks; week-of-year overlay shows consistent year-over-year patterns — calendar features will help the regression.
-- **SNAP intensity correlates positively with FOODS sales**, especially in CA and TX.
+| Model | RMSE (raw units) | MAE (raw units) | R² (raw) | vs naive | vs Linear |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| **SVR (Polynomial)** | **746.5** | 442.6 | 0.9895 | **−40.7%** | **−18.3%** |
+| SVR (RBF) | 752.3 | 440.6 | 0.9894 | −40.2% | −17.7% |
+| **PolyRidge (selected final)** | **754.9** | 449.6 | 0.9893 | **−40.0%** | **−17.4%** |
+| Lasso | 911.6 | 493.8 | 0.9844 | −27.6% | −0.3% |
+| Linear Regression (baseline) | 914.0 | 496.1 | 0.9843 | −27.4% | — |
+| Ridge | 914.6 | 495.8 | 0.9843 | −27.3% | +0.1% |
+| Naive (last-week persistence) | 1,258.5 | 632.7 | 0.9701 | — | +37.7% |
 
-### Baseline model performance (Notebook 03)
+**Selected final model: PolyRidge** (Polynomial Features degree 2, interaction-only, Ridge alpha=100).
 
-Holdout: last 12 weeks (2016-03-01 → 2016-05-17), 840 observations. Train: 18,200 observations across 260 weeks.
+The two SVR variants and PolyRidge are clustered within ~1% of each other. The choice between them comes down to secondary criteria:
 
-| Metric | Naive (persistence) | Linear Regression | Improvement |
-| ------ | ------------------- | ----------------- | ----------- |
-| RMSE (raw units) | 1,258.51 | **913.97** | **−27.4%** |
-| MAE (raw units) | 632.74 | **496.12** | **−21.6%** |
-| R² (raw units) | 0.970 | **0.984** | +1.4 pp |
-| RMSE (log) | 0.146 | **0.121** | −17.3% |
-| MAE (log) | 0.105 | **0.088** | −16.2% |
-| R² (log) | 0.986 | **0.990** | +0.5 pp |
+| Criterion | SVR (Polynomial) | SVR (RBF) | **PolyRidge (final)** |
+| --- | --- | --- | --- |
+| Holdout RMSE rank | 1 | 2 | 3 |
+| Interpretability | Low — kernel + support vectors | Low — kernel + support vectors | **High — named coefficients** |
+| Inference speed | Slow — kernel against many SVs | Slow — kernel against many SVs | **Fast — matrix multiply** |
+| Scenario-tool friendliness | Hard to explain a forecast | Same | **Coefficients explain why** |
 
-The Linear Regression baseline beats the naive last-week-sales benchmark by **~27% on RMSE**, which is a meaningful improvement on top of an already-strong persistence baseline.
+For a planner-facing scenario tool, the ~1% RMSE gap to SVR doesn't justify losing interpretability and inference speed. **PolyRidge captures the non-linear and interaction effects** that drove the 17% improvement over the linear baseline, while remaining fully interpretable.
 
-### Top 5 most-predictive features (standardized coefficients)
+### Cross-validation rationale
 
-| Rank | Feature | Coefficient |
-| ---- | ------- | ----------- |
-| 1 | `log_unit_sales_lag1` | **+0.624** |
-| 2 | `log_unit_sales_roll4` | **+0.358** |
-| 3 | `log_unit_sales_roll12` | **+0.191** |
-| 4 | `log_unit_sales_lag4` | **+0.142** |
-| 5 | `dept_id_HOBBIES_2` | **−0.124** |
+All hyperparameters were tuned with `GridSearchCV` over `TimeSeriesSplit(n_splits=5)` — an expanding-window time-series CV that prevents future observations from leaking into past training folds. `KFold` would be invalid for time-series data.
 
-Lagged sales dominate, as expected for a strongly persistent time-series. Department fixed effects come next, then SNAP days (+0.030) and the assortment size control (+0.024).
+### Top features driving the model
 
-### Key finding: naive lift estimates are largely confounded
+Lagged sales dominate, as expected for a strongly-persistent time-series:
 
-The most important EDA-to-model takeaway: **once the regression controls for lagged sales and calendar/seasonality, the promo-feature coefficients collapse to near-zero** (`promo_share` +0.005, `sales_weighted_discount_depth` −0.003 in standardized units). The naive +14% to +20% lift seen in EDA was almost entirely seasonal and selection bias — the items/depts/weeks that get promoted *would have sold more anyway* given their seasonal patterns and prior trajectory.
+| Rank | Feature | Standardized coefficient |
+| ---: | --- | ---: |
+| 1 | `log_unit_sales_lag1` (sales last week) | +0.624 |
+| 2 | `log_unit_sales_roll4` (4-week trailing avg) | +0.358 |
+| 3 | `log_unit_sales_roll12` (12-week trailing avg) | +0.191 |
+| 4 | `log_unit_sales_lag4` (sales 4 weeks ago) | +0.142 |
+| 5 | `dept_id_HOBBIES_2` (department effect) | −0.124 |
 
-This validates the project's central methodological point: **headline lift comparisons without controls are not actionable**. The retailer-planning value comes from a model that can produce *counterfactual* sales predictions under different discount scenarios, not from raw means.
+Promo-related coefficients, after controlling for the above, collapse toward zero:
 
-That said, the near-zero coefficient is also a signal that M20's simple linear model may be too restrictive for the discount-response surface. Polynomial features and non-linear models in M24 are well-motivated.
+| Feature | Standardized coefficient |
+| --- | ---: |
+| `promo_share` | +0.005 |
+| `promo_share_lag1` | +0.004 |
+| `sales_weighted_discount_depth` | −0.003 |
 
-### Visualizations
+This is the methodological headline (Finding #1 in the nontechnical section).
 
-Saved to `reports/figures/`:
+### Selected figures
 
-1. `01_target_distribution.png` — raw vs log1p sales histograms
-2. `02_sales_by_dept.png` — sales boxplots per department
-3. `03_promo_prevalence.png` — promo prevalence per department + discount-depth distribution
-4. `04_naive_lift.png` — mean sales by promo bucket × department
-5. `05_seasonality.png` — monthly mean + year-over-year week-of-year overlay
-6. `06_event_lift.png` — event-week sales lift per department
-7. `07_snap_effect.png` — sales vs SNAP days, by state
-8. `08_top_coefficients.png` — baseline-model top 15 standardized coefficients
-9. `09_residuals.png` — predicted-vs-actual, residual distribution, residuals-vs-fitted
+| Figure | Description |
+| --- | --- |
+| `04_naive_lift.png` | Mean sales by promo bucket × department — the naive lift estimates |
+| `08_top_coefficients.png` | Standardized coefficients from the baseline linear regression |
+| `13_nb06_six_model_comparison.png` | All six models on the same holdout, RMSE bar chart |
+| `14_nb06_top3_residuals.png` | Residual diagnostics for the three best models |
+| `15_nb06_per_dept_rmse.png` | Per-department RMSE for all six models |
+| `17_nb07_scenario_forecasts.png` | Scenario-tool output for three promo strategies |
+| `18_nb07_cross_dept_scenario.png` | Cross-department comparison for the same discount schedule |
 
-## Next Steps (Module 24)
+All figures live in [reports/figures/](reports/figures/).
 
-- Add **Polynomial Features** on `discount_depth` to capture non-linear price elasticity (sales response is typically convex in discount).
-- Add **Ridge** and **Lasso** regularization to handle correlation among lagged features.
-- Add **Support Vector Regression** with RBF and Polynomial kernels.
-- Compare all models on the same 12-week temporal holdout using a uniform metric (RMSE).
-- Build a small **scenario tool**: given a planner's discount schedule for the next 4 weeks, output a sales forecast with a prediction interval.
-- (Stretch) **Cross-dataset validation**: re-run the same pipeline on Favorita or Dunnhumby to demonstrate the methodology generalizes beyond Walmart.
+---
 
-## Repository Outline
+## Caveats and mitigations
+
+Six known limitations, with concrete mitigations baked into the pipeline:
+
+| Caveat | Mitigation |
+| --- | --- |
+| **Sparsity / intermittency at item-store-day grain** — long zero-sale runs at the finest grain | Aggregate to **(dept_id, store_id, week)** grain — smooths zeros and gives ~20K usable training rows |
+| **Stockouts are not labeled** — zero sales could mean "no demand" or "out of stock" | Documented as a known limitation. Promo weeks with zero sales are flagged as suspect (almost certainly a stockout) |
+| **No explicit promotion flag** — M5 doesn't label promotions | Operational definition: `discount_depth > 5%` from trailing 4-week median. Sensitivity to threshold can be checked in future work |
+| **Variable item launch dates** — some items have early zeros because they hadn't launched | Filter to items with first non-zero sale before 2013-01-01 |
+| **Weekly prices, not daily** — intra-week price moves invisible | Non-issue at our weekly grain — price granularity matches modeling granularity |
+| **Only 3 categories** (Foods, Hobbies, Household) | FOODS has 3 sub-departments where most grocery-promo behavior lives. Cross-category robustness is checked across all 7 departments |
+
+---
+
+## Repository structure
 
 ```text
 ucb-cap-op-promo-str/
@@ -206,38 +252,74 @@ ucb-cap-op-promo-str/
 ├── requirements.txt                   # pip dependencies
 ├── .gitignore
 ├── data/
-│   ├── raw/
-│   │   ├── m5/                        # M5 Walmart files — see data/raw/README.md
-│   │   └── favorita/                  # Favorita files (supplemental, M24 use)
-│   ├── interim/                       # cached weekly panel (parquet)
-│   └── processed/                     # final feature matrix
+│   ├── raw/                           # M5 download (gitignored) — see data/raw/README.md
+│   ├── interim/                       # cached weekly panel (parquet, gitignored)
+│   └── processed/
 ├── notebooks/
 │   ├── 01_data_loading.ipynb          # load + melt + filter + aggregate + cache
-│   ├── 02_eda.ipynb                   # exploratory analysis
-│   └── 03_baseline_model.ipynb        # feature engineering + Linear Regression baseline
+│   ├── 02_eda.ipynb                   # exploratory analysis (9 figures)
+│   ├── 03_baseline_model.ipynb        # feature engineering + Linear Regression baseline
+│   ├── 04_advanced_models.ipynb       # Poly + Ridge + Lasso w/ TimeSeriesSplit CV + GridSearchCV
+│   ├── 05_svr.ipynb                   # SVR (RBF + Polynomial) w/ GridSearchCV
+│   ├── 06_model_comparison.ipynb      # 6-model comparison + final selection
+│   └── 07_scenario_tool.ipynb         # planner-facing forecast utility
 ├── src/
 │   ├── data.py                        # M5 loader + dept-store-week aggregator
 │   ├── features.py                    # calendar + lag + promo-lag features
-│   └── models.py                      # (M24) model wrappers
-└── reports/figures/                   # saved EDA plots
+│   └── models.py                      # design matrix, CV splitter, metrics, save/load helpers
+└── reports/
+    ├── figures/                       # saved plots (referenced from notebooks and this README)
+    ├── model_results.json             # holdout metrics for every model
+    ├── best_params.json               # tuned hyperparameters per model
+    └── holdout_predictions.parquet    # per-row predictions for all models
 ```
 
-## How to Reproduce
+---
+
+## How to reproduce
 
 ```bash
 # 1. Clone and enter
-git clone <repo-url> && cd ucb-cap-op-promo-str
+git clone https://github.com/amrendrav/grocery-promotional-lift-capstone.git
+cd grocery-promotional-lift-capstone
 
-# 2. Set up environment
+# 2. Set up the environment
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
-# 3. Download M5 data (manual — see data/raw/README.md)
+# 3. Download the M5 data (manual — see data/raw/README.md)
 
-# 4. Run notebooks in order
+# 4. Run the notebooks in order
 jupyter lab notebooks/
+#   01 → 02 → 03 → 04 → 05 → 06 → 07
 ```
+
+Notebook 05 (SVR) is the longest single notebook to execute (~10 min on a modern laptop). All others run in under 1 minute.
+
+---
+
+## Next steps and recommendations
+
+### Immediate (production deployment)
+
+1. **Re-train on Albertsons internal data** before deploying. The methodology transfers but coefficient values won't.
+2. **Wire the scenario tool into the planner workflow** as a simple web form or Excel add-in, returning the 4-week forecast + interval.
+3. **Implement a basic monitoring loop** — log every forecast and the realized sales; trigger re-training when residuals drift.
+
+### Near-term modeling improvements
+
+1. **Sensitivity analysis on the promo threshold** — compare 3% / 5% / 10% discount thresholds. The 5% number is a defensible default but isn't sacred.
+2. **Add a stockout flag** if Albertsons inventory data is available — zero-sale weeks during a promo are almost certainly stockouts and should be excluded from training.
+3. **Hierarchical models** — share information across stores within the same banner/region, useful for low-volume departments.
+
+### Stretch (research)
+
+1. **Cross-dataset validation on Favorita or Dunnhumby** — show the methodology generalizes beyond Walmart.
+2. **Causal estimation** — pair the predictive model with a propensity-score-based causal estimator to isolate promo lift from confounders (instead of relying on the regression to do both jobs).
+3. **Item-level rollout** — re-fit at the item-store-week grain (with appropriate sparsity handling) to give per-SKU recommendations.
+
+---
 
 ## Contact
 
-**Amrendra Vimal**
+**Amrendra Vimal** — [amrendra.vimal@albertsons.com](mailto:amrendra.vimal@albertsons.com)

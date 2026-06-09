@@ -1,0 +1,25 @@
+{
+  "Ridge": {
+    "alpha": 10.0
+  },
+  "Lasso": {
+    "alpha": 0.001
+  },
+  "PolyRidge": {
+    "poly__degree": 2,
+    "poly__interaction_only": true,
+    "ridge__alpha": 100.0
+  },
+  "SVR_RBF": {
+    "C": 10.0,
+    "epsilon": 0.05,
+    "gamma": 0.01
+  },
+  "SVR_Poly": {
+    "C": 0.1,
+    "coef0": 1.0,
+    "degree": 2,
+    "epsilon": 0.1,
+    "gamma": "scale"
+  }
+}
