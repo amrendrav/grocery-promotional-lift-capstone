@@ -6,7 +6,7 @@
 
 ---
 
-## What this project does, in plain English
+## What this project does
 
 Grocery stores run thousands of promotions every quarter — temporary price cuts, weekly-flyer features, end-cap displays. But when sales spike during a promotion, it's hard to tell **how much** of that spike was actually caused by the promotion versus what would have sold anyway.
 
@@ -33,7 +33,7 @@ Grocery margins are thin (1–3% net), so even modest improvements in forecast a
 
 ---
 
-## Important findings (nontechnical)
+## Important findings 
 
 ### 1. Naive lift estimates overstate promotion impact
 
@@ -55,7 +55,7 @@ When the scenario tool is asked to forecast a department-store with sparse histo
 
 ---
 
-## Recommendations for a category manager (non-technical reader)
+## Recommendations for a category manager 
 
 1. **Stop using raw "average sales on promo weeks" as a lift estimate.** They're inflated by seasonality and the fact that high-volume products get promoted more often. Use a model-based estimate that controls for these confounders.
 2. **Build promotional plans around the scenario tool's prediction interval, not just the point forecast.** If the 80% interval is wide, you have meaningful uncertainty — order conservatively. If the interval is tight, you can lean into the point forecast.
